@@ -1,12 +1,12 @@
-const getAllPosts = (req, res) => {
-
-  const posts = [
+const posts = [
     { id: 1, title: 'Controller Post 1' },
     { id: 2, title: 'Controller Post 2' }
   ];
 
+const getAllPosts = (req, res) => {
+
   res.status(200).json({
-    message: 'Posts fetched successfully',
+    success: true,
     data: posts
   });
 };
@@ -15,7 +15,8 @@ const getPostById = (req, res) => {
   const postId = req.params.postId;
 
   res.status(200).json({
-    message: `Fetching data for post with ID:  ${postId}`
+    success: true,
+    data: posts.find(post => post.id === parseInt(postId))
   });
 };
 
