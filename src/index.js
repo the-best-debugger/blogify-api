@@ -1,6 +1,19 @@
 const express = require('express');
+const mongoose = require('mongoose');
+require('dotenv').config();
 const app = express();
 const PORT = 3000;
+
+// Parse JSON request bodies
+app.use(express.json());
+
+// Middlewares
+const logger = require('./middleware/logger');
+const auth = require('./middleware/auth');
+const errorHandler = require('./middleware/errorHandler');
+
+app.use(logger);
+app.use(auth);
 
 // 1. Import our new post router
 const postRouter = require('./routes/posts.routes.js');
@@ -13,10 +26,20 @@ app.get('/', (req, res) => {
 
 // 2. Mount the router
 app.use('/api/v1/posts', postRouter);
-
-// 3. Mount the router
 app.use('/api/v1/users', userRouter);
+
+// Error handler (must be after routes)
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}/`);
 });
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('Connected to MongoDB');
+  })
+  .catch((err) => {
+    console.error('Error connecting to MongoDB:', err);
+  });
