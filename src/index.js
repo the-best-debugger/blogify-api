@@ -1,19 +1,20 @@
 const express = require('express');
 const mongoose = require('mongoose');
 require('dotenv').config();
+const cookieParser = require('cookie-parser');
 const app = express();
 const PORT = 3000;
 
 // Parse JSON request bodies
 app.use(express.json());
+// Parse cookies (needed for auth via HttpOnly cookies)
+app.use(cookieParser());
 
 // Middlewares
 const logger = require('./middleware/logger');
-const auth = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 
 app.use(logger);
-app.use(auth);
 
 // 1. Import our new post router
 const postRouter = require('./routes/posts.routes.js');
