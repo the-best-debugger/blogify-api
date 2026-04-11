@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const User = require('../../models/users.js');
 const { success, error: sendError } = require('../utils/response');
 
@@ -26,7 +27,12 @@ const getAllUsers = async (req, res) => {
 
 const createUser = async (req, res) => {
   try {
-    const newUser = await User.create(req.body);
+    const { password } = req.body;
+    if (!password) return sendError(res, null, 'Password is required', 400);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    const userPayload = { ...req.body, password: hashedPassword };
+    const newUser = await User.create(userPayload);
     return success(res, newUser, 'User created', 201);
   } catch (err) {
     return sendError(res, err, 'Error creating user', 500);

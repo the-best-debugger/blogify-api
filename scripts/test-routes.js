@@ -7,102 +7,80 @@ function checkFetch() {
   }
 }
 
-async function http(method, path, body) {
+async function http(method, path, body, cookie) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
+  if (cookie) opts.headers['Cookie'] = cookie;
   const res = await fetch(BASE + path, opts);
   let data;
   try { data = await res.json(); } catch (e) { data = null; }
-  return { status: res.status, data };
-}
-
-async function createUsers(n) {
-  const ids = [];
-  for (let i = 0; i < n; i++) {
-    const t = Date.now();
-    const payload = {
-      username: `test_user_${t}_${i}`,
-      email: `test_${t}_${i}@example.com`,
-      password: `pass${i}`
-    };
-    const res = await http('POST', '/users', payload);
-    if (res.status >= 200 && res.status < 300 && res.data && res.data.data && res.data.data._id) {
-      ids.push(res.data.data._id);
-    } else {
-      console.warn('User create failed:', res.status, res.data && res.data.message);
-    }
-  }
-  return ids;
-}
-
-async function createPosts(n, authorNamePrefix) {
-  const ids = [];
-  for (let i = 0; i < n; i++) {
-    const t = Date.now();
-    const payload = {
-      title: `Test Post ${t} - ${i}`,
-      content: `This is test content ${i}`,
-      author: `${authorNamePrefix}_${i}`
-    };
-    const res = await http('POST', '/posts', payload);
-    if (res.status >= 200 && res.status < 300 && res.data && res.data.data && res.data.data._id) {
-      ids.push(res.data.data._id);
-    } else {
-      console.warn('Post create failed:', res.status, res.data && res.data.message);
-    }
-  }
-  return ids;
+  return { status: res.status, data, headers: res.headers };
 }
 
 async function run() {
   checkFetch();
-  console.log('Starting route tests against', BASE);
+  console.log('Integration tests against', BASE);
 
-  // Create 50 users and 50 posts -> 100 documents
-  console.log('Creating 50 users...');
-  const userIds = await createUsers(50);
-  console.log('Created users:', userIds.length);
+  // Phase 1: Happy path for Alice
+  const alice = { username: `Alice_${Date.now()}`, email: `alice_${Date.now()}@example.com`, password: 'alicepass' };
+  console.log('Registering Alice...');
+  const regA = await http('POST', '/users', alice);
+  console.log('Register Alice ->', regA.status);
+  if (regA.status !== 201) return console.error('Alice registration failed', regA.data);
 
-  console.log('Creating 50 posts...');
-  const authorPrefix = 'test_author';
-  const postIds = await createPosts(50, authorPrefix);
-  console.log('Created posts:', postIds.length);
+  console.log('Logging in Alice...');
+  const loginA = await http('POST', '/users/login', { email: alice.email, password: alice.password });
+  console.log('Login Alice ->', loginA.status);
+  if (loginA.status !== 200) return console.error('Alice login failed', loginA.data);
+  const setCookie = loginA.headers.get('set-cookie');
+  if (!setCookie || !/token=/.test(setCookie)) {
+    console.warn('No token cookie set in login response headers');
+  } else {
+    console.log('Set-Cookie header:', setCookie.split(';')[1] ? setCookie.split(';')[0] : setCookie.split(';')[0]);
+  }
+  const aliceCookie = setCookie ? setCookie.split(';')[0] : null;
+  if (setCookie && !/HttpOnly/i.test(setCookie)) console.warn('Warning: Set-Cookie missing HttpOnly flag');
 
-  // Test GET all
+  console.log('Creating a post as Alice (cookie present)...');
+  const postPayload = { title: 'Alice Post', content: 'Content by Alice' };
+  const createPost = await http('POST', '/posts', postPayload, aliceCookie);
+  console.log('Create Post ->', createPost.status);
+  if (createPost.status !== 201) return console.error('Create post failed', createPost.data);
+  const postId = createPost.data && createPost.data.data && createPost.data.data._id;
+
+  // Phase 2: Intruder
+  console.log('Logging out Alice (clear cookie)...');
+  const logoutA = await http('POST', '/users/logout', null, aliceCookie);
+  console.log('Logout Alice ->', logoutA.status);
+
+  console.log('Attempting to DELETE Alice post without cookie...');
+  const delNoAuth = await http('DELETE', `/posts/${postId}`);
+  console.log('DELETE without cookie ->', delNoAuth.status, delNoAuth.data && delNoAuth.data.message);
+
+  // Phase 3: Imposter
+  const bob = { username: `Bob_${Date.now()}`, email: `bob_${Date.now()}@example.com`, password: 'bobpass' };
+  console.log('Registering Bob...');
+  const regB = await http('POST', '/users', bob);
+  console.log('Register Bob ->', regB.status);
+  if (regB.status !== 201) return console.error('Bob registration failed', regB.data);
+
+  console.log('Logging in Bob...');
+  const loginB = await http('POST', '/users/login', { email: bob.email, password: bob.password });
+  console.log('Login Bob ->', loginB.status);
+  const setCookieB = loginB.headers.get('set-cookie');
+  const bobCookie = setCookieB ? setCookieB.split(';')[0] : null;
+
+  console.log('Bob attempting to DELETE Alice post...');
+  const delByBob = await http('DELETE', `/posts/${postId}`, null, bobCookie);
+  console.log('DELETE by Bob ->', delByBob.status, delByBob.data && delByBob.data.message);
+
+  // Final checks: GET endpoints
   const allUsers = await http('GET', '/users');
   console.log('GET /users ->', allUsers.status, Array.isArray(allUsers.data && allUsers.data.data) ? `${allUsers.data.data.length} items` : 'no list');
-
   const allPosts = await http('GET', '/posts');
   console.log('GET /posts ->', allPosts.status, Array.isArray(allPosts.data && allPosts.data.data) ? `${allPosts.data.data.length} items` : 'no list');
 
-  // Test GET by id (first ones)
-  if (userIds.length) {
-    const u = await http('GET', `/users/${userIds[0]}`);
-    console.log('GET /users/:id ->', u.status);
-  }
-  if (postIds.length) {
-    const p = await http('GET', `/posts/${postIds[0]}`);
-    console.log('GET /posts/:id ->', p.status);
-  }
-
-  // Test PUT (update) for first user and post
-  if (userIds.length) {
-    const res = await http('PUT', `/users/${userIds[0]}`, { username: `updated_${Date.now()}` });
-    console.log('PUT /users/:id ->', res.status);
-  }
-  if (postIds.length) {
-    const res = await http('PUT', `/posts/${postIds[0]}`, { title: `Updated Title ${Date.now()}` });
-    console.log('PUT /posts/:id ->', res.status);
-  }
-
-  // Test DELETE endpoints without removing created docs: use a valid-looking but non-existent id
-  const fakeId = '000000000000000000000000';
-  const delUser = await http('DELETE', `/users/${fakeId}`);
-  console.log('DELETE /users/:id (non-existent) ->', delUser.status);
-  const delPost = await http('DELETE', `/posts/${fakeId}`);
-  console.log('DELETE /posts/:id (non-existent) ->', delPost.status);
-
-  console.log('Finished. Created', userIds.length + postIds.length, 'documents (users+posts). No created documents were deleted.');
+  console.log('Integration test finished. Post created:', postId);
 }
 
 run().catch(err => {
